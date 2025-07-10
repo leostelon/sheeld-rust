@@ -1,0 +1,22 @@
+[tasks.dev]
+command = "cargo"
+args = ["watch", "-x run"]
+
+[tasks.build]
+command = "cargo"
+args = ["build"]
+
+[tasks.format]
+install_crate = "rustfmt"
+command = "cargo"
+args = ["fmt", "--", "--emit=files"]
+
+[tasks.clean]
+command = "cargo"
+args = ["clean"]
+
+[tasks.produce]
+dependencies = [
+    "format",
+    "build",
+]
