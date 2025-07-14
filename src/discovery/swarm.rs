@@ -3,12 +3,13 @@ use std::{error::Error, str::FromStr};
 use futures::StreamExt;
 use libp2p::{
     Swarm, SwarmBuilder,
-    kad::{
-        self, Mode, RecordKey,
-        store::{MemoryStore, RecordStore},
+    gossipsub::{
+        Behaviour as Gossipsub, Config as GossipsubConfig, IdentTopic, MessageAuthenticity,
     },
-    mdns, noise,
-    swarm::{self, NetworkBehaviour, SwarmEvent},
+    identity,
+    kad::{self, Mode, store::MemoryStore},
+    noise,
+    swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux,
 };
 use tokio::{
@@ -39,8 +40,15 @@ pub async fn start_libp2p() -> Result<(), Box<dyn Error>> {
     #[derive(NetworkBehaviour)]
     struct Behaviour {
         kademlia: kad::Behaviour<MemoryStore>,
-        mdns: mdns::tokio::Behaviour,
+        gossipsub: Gossipsub,
     }
+
+    let local_key = identity::Keypair::generate_ed25519();
+    let gossipsub = Gossipsub::new(
+        MessageAuthenticity::Signed(local_key.clone()),
+        GossipsubConfig::default(),
+    )
+    .unwrap();
 
     let mut swarm = SwarmBuilder::with_new_identity()
         .with_tokio()
@@ -55,17 +63,18 @@ pub async fn start_libp2p() -> Result<(), Box<dyn Error>> {
                     key.public().to_peer_id(),
                     MemoryStore::new(key.public().to_peer_id()),
                 ),
-                mdns: mdns::tokio::Behaviour::new(
-                    mdns::Config {
-                        ..Default::default()
-                    },
-                    key.public().to_peer_id(),
-                )?,
+                gossipsub,
             })
         })?
         .build();
 
     swarm.behaviour_mut().kademlia.set_mode(Some(Mode::Server));
+    // Listen to topics
+    let topic = IdentTopic::new("ping");
+    match swarm.behaviour_mut().gossipsub.subscribe(&topic) {
+        Ok(e) => println!("Subscribed to the topic {e}"),
+        Err(r) => println!("{r}"),
+    }
 
     // Listen on all interfaces and whatever port the OS assigns.
     swarm.listen_on("/ip4/0.0.0.0/tcp/0".parse()?)?;
@@ -104,28 +113,14 @@ pub async fn start_libp2p() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    async fn handle_swarm_event(swarm: &mut Swarm<Behaviour>, event: SwarmEvent<BehaviourEvent>) {
+    async fn handle_swarm_event(_swarm: &mut Swarm<Behaviour>, event: SwarmEvent<BehaviourEvent>) {
         match event {
             SwarmEvent::NewListenAddr { address, .. } => {
                 println!("✅ Listening on: {address:?}");
             }
 
-            SwarmEvent::Behaviour(BehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
-                for (peer_id, multi_address) in list {
-                    println!("Self: {}, Peer: {}", swarm.local_peer_id(), peer_id);
-                    swarm
-                        .behaviour_mut()
-                        .kademlia
-                        .add_address(&peer_id, multi_address);
-                    let ps = swarm.behaviour_mut().kademlia.get_closest_peers(peer_id);
-                    println!("🟢 Discovered peer: {peer_id}, {:?}", ps);
-                }
-            }
-
-            SwarmEvent::Behaviour(BehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
-                for (peer_id, _) in list {
-                    println!("⚠️ Peer expired (mdns timeout): {peer_id}");
-                }
+            SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(msg)) => {
+                println!("Received: {:?}", msg);
             }
 
             SwarmEvent::ConnectionClosed {
