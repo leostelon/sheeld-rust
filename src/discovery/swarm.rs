@@ -18,6 +18,8 @@ use libp2p::{
 };
 use tokio::select;
 
+use crate::common::models::message::Message;
+
 #[tokio::main]
 pub async fn start_libp2p() -> Result<(), Box<dyn Error>> {
     #[derive(Debug, PartialEq)]
@@ -82,13 +84,7 @@ pub async fn start_libp2p() -> Result<(), Box<dyn Error>> {
 
     // Listen to topics
     let topic = IdentTopic::new("ping");
-    let own_topic = IdentTopic::new(swarm.local_peer_id().to_string());
     swarm.behaviour_mut().gossipsub.subscribe(&topic).unwrap();
-    swarm
-        .behaviour_mut()
-        .gossipsub
-        .subscribe(&own_topic)
-        .unwrap();
 
     // Listen on all interfaces and whatever port the OS assigns.
     swarm.listen_on("/ip4/0.0.0.0/tcp/3000".parse()?)?;
@@ -111,6 +107,23 @@ pub async fn start_libp2p() -> Result<(), Box<dyn Error>> {
             }
             SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(msg)) => {
                 println!("Received: {:?}", msg);
+                match msg {
+                    libp2p::gossipsub::Event::Message {
+                        propagation_source: _,
+                        message_id: _,
+                        message,
+                    } => {
+                        let dmsg: Result<Message<String>, serde_json::Error> =
+                            serde_json::from_str(&String::from_utf8(message.data).unwrap() as &str);
+                        match dmsg {
+                            Err(e) => println!("{e}"),
+                            Ok(e) => {
+                                println!("Received: {:?}", e.data);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
             }
             SwarmEvent::Behaviour(BehaviourEvent::Kademlia(KademliaEvent::RoutingUpdated {
                 peer,
