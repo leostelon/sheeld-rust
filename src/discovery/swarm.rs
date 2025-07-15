@@ -1,16 +1,17 @@
 use std::{
     error::Error,
+    fs,
     str::{self, FromStr},
 };
 
 use futures::StreamExt;
 use libp2p::{
-    Swarm, SwarmBuilder,
+    Multiaddr, PeerId, Swarm, SwarmBuilder,
     gossipsub::{
         Behaviour as Gossipsub, Config as GossipsubConfig, IdentTopic, MessageAuthenticity,
     },
     identity,
-    kad::{self, Mode, store::MemoryStore},
+    kad::{self, Event as KademliaEvent, Mode, store::MemoryStore},
     noise,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux,
@@ -70,6 +71,15 @@ pub async fn start_libp2p() -> Result<(), Box<dyn Error>> {
 
     swarm.behaviour_mut().kademlia.set_mode(Some(Mode::Server));
 
+    // Connect to bootstrap nodes if available
+    let bootnodes = get_bootnodes().await;
+    for b in bootnodes {
+        swarm
+            .behaviour_mut()
+            .kademlia
+            .add_address(&b.peer_id, b.multiaddr);
+    }
+
     // Listen to topics
     let topic = IdentTopic::new("ping");
     let own_topic = IdentTopic::new(swarm.local_peer_id().to_string());
@@ -102,6 +112,12 @@ pub async fn start_libp2p() -> Result<(), Box<dyn Error>> {
             SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(msg)) => {
                 println!("Received: {:?}", msg);
             }
+            SwarmEvent::Behaviour(BehaviourEvent::Kademlia(KademliaEvent::RoutingUpdated {
+                peer,
+                ..
+            })) => {
+                println!("Discovered peer: {peer}");
+            }
             SwarmEvent::ConnectionEstablished {
                 peer_id,
                 connection_id: _,
@@ -125,6 +141,43 @@ pub async fn start_libp2p() -> Result<(), Box<dyn Error>> {
                 );
             }
             _ => {}
+        }
+    }
+}
+
+async fn get_bootnodes() -> Vec<Bootnode> {
+    let bootstrap_nodes_file_path: &str = "bootstrap_nodes.txt";
+    let file_result = fs::read_to_string(bootstrap_nodes_file_path);
+    let mut content = String::new();
+    match file_result {
+        Ok(c) => {
+            content = c;
+        }
+        Err(e) => {
+            println!("{:?}", e)
+        }
+    }
+    let mut bootnodes: Vec<Bootnode> = Vec::new();
+    if content.is_empty() {
+        return bootnodes;
+    };
+    for n in content.split('\n').into_iter() {
+        let bn = Bootnode::new(&n.split(":").nth(0).unwrap(), &n.split(":").nth(1).unwrap());
+        bootnodes.push(bn);
+    }
+    bootnodes
+}
+
+struct Bootnode {
+    multiaddr: Multiaddr,
+    peer_id: PeerId,
+}
+
+impl Bootnode {
+    pub fn new(multiaddr: &str, peer_id: &str) -> Self {
+        Self {
+            peer_id: PeerId::from_str(peer_id).expect("Invalid PeerId"),
+            multiaddr: Multiaddr::from_str(multiaddr).expect("Invalid Multiaddr"),
         }
     }
 }
