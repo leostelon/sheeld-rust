@@ -31,7 +31,6 @@ impl SheeldGossip {
     pub fn new() -> Self {
         Self { peers: Vec::new() }
     }
-    #[tokio::main]
     pub async fn start_libp2p(self: &mut Self) -> Result<(), Box<dyn Error>> {
         let mut swarm = SwarmBuilder::with_new_identity()
             .with_tokio()
