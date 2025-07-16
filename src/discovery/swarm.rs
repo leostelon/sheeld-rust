@@ -62,6 +62,10 @@ pub async fn start_libp2p() -> Result<(), Box<dyn Error>> {
             .behaviour_mut()
             .kademlia
             .add_address(&b.peer_id, b.multiaddr);
+        swarm
+            .behaviour_mut()
+            .gossipsub
+            .add_explicit_peer(&b.peer_id);
     }
 
     // Listen to topics
