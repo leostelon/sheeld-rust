@@ -1,12 +1,12 @@
 use std::{
     error::Error,
     fs,
-    str::{self, FromStr},
+    str::{self},
 };
 
 use futures::StreamExt;
 use libp2p::{
-    Multiaddr, PeerId, Swarm, SwarmBuilder,
+    Swarm, SwarmBuilder,
     gossipsub::{
         Behaviour as Gossipsub, Config as GossipsubConfig, IdentTopic, MessageAuthenticity,
     },
@@ -16,7 +16,7 @@ use libp2p::{
 };
 use tokio::select;
 
-use crate::common::models::message::Message;
+use crate::common::models::{message::Message, peer_info::PeerInfo};
 
 #[derive(NetworkBehaviour)]
 struct SheeldBehaviour {
@@ -162,18 +162,4 @@ async fn get_bootnodes() -> Vec<PeerInfo> {
         bootnodes.push(bn);
     }
     bootnodes
-}
-
-struct PeerInfo {
-    multiaddr: Multiaddr,
-    peer_id: PeerId,
-}
-
-impl PeerInfo {
-    pub fn new(multiaddr: &str, peer_id: &str) -> Self {
-        Self {
-            peer_id: PeerId::from_str(peer_id).expect("Invalid PeerId"),
-            multiaddr: Multiaddr::from_str(multiaddr).expect("Invalid Multiaddr"),
-        }
-    }
 }
