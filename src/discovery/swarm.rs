@@ -10,8 +10,6 @@ use libp2p::{
     gossipsub::{
         Behaviour as Gossipsub, Config as GossipsubConfig, IdentTopic, MessageAuthenticity,
     },
-    identity,
-    kad::{self, Event as KademliaEvent, Mode, store::MemoryStore},
     noise,
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux,
@@ -20,78 +18,79 @@ use tokio::select;
 
 use crate::common::models::message::Message;
 
-#[tokio::main]
-pub async fn start_libp2p() -> Result<(), Box<dyn Error>> {
-    #[derive(NetworkBehaviour)]
-    struct Behaviour {
-        kademlia: kad::Behaviour<MemoryStore>,
-        gossipsub: Gossipsub,
+#[derive(NetworkBehaviour)]
+struct SheeldBehaviour {
+    gossipsub: Gossipsub,
+}
+
+pub struct SheeldGossip {
+    peers: Vec<PeerInfo>,
+}
+
+impl SheeldGossip {
+    pub fn new() -> Self {
+        Self { peers: Vec::new() }
     }
+    #[tokio::main]
+    pub async fn start_libp2p(self: &mut Self) -> Result<(), Box<dyn Error>> {
+        let mut swarm = SwarmBuilder::with_new_identity()
+            .with_tokio()
+            .with_tcp(
+                tcp::Config::default(),
+                noise::Config::new,
+                yamux::Config::default,
+            )?
+            .with_behaviour(|key| {
+                let gossipsub = Gossipsub::new(
+                    MessageAuthenticity::Signed(key.clone()),
+                    GossipsubConfig::default(),
+                )
+                .unwrap();
+                Ok(SheeldBehaviour { gossipsub })
+            })?
+            .build();
 
-    let local_key = identity::Keypair::generate_ed25519();
-    let gossipsub = Gossipsub::new(
-        MessageAuthenticity::Signed(local_key.clone()),
-        GossipsubConfig::default(),
-    )
-    .unwrap();
-
-    let mut swarm = SwarmBuilder::with_new_identity()
-        .with_tokio()
-        .with_tcp(
-            tcp::Config::default(),
-            noise::Config::new,
-            yamux::Config::default,
-        )?
-        .with_behaviour(|key| {
-            Ok(Behaviour {
-                kademlia: kad::Behaviour::new(
-                    key.public().to_peer_id(),
-                    MemoryStore::new(key.public().to_peer_id()),
-                ),
-                gossipsub,
-            })
-        })?
-        .build();
-
-    swarm.behaviour_mut().kademlia.set_mode(Some(Mode::Server));
-
-    // Connect to bootstrap nodes if available
-    let bootnodes = get_bootnodes().await;
-    for b in bootnodes {
-        swarm
-            .behaviour_mut()
-            .kademlia
-            .add_address(&b.peer_id, b.multiaddr);
-        swarm
-            .behaviour_mut()
-            .gossipsub
-            .add_explicit_peer(&b.peer_id);
-    }
-
-    // Listen to topics
-    let topic = IdentTopic::new("ping");
-    swarm.behaviour_mut().gossipsub.subscribe(&topic).unwrap();
-
-    // Listen on all interfaces and whatever port the OS assigns.
-    swarm.listen_on("/ip4/0.0.0.0/tcp/3000".parse()?)?;
-    println!("PEER ID: {:?}", swarm.local_peer_id().to_base58());
-
-    // Kick it off.
-    loop {
-        select! {
-            event = swarm.select_next_some() =>  {
-                handle_swarm_event(&mut swarm, event).await;
+        // Connect to bootstrap nodes if available
+        let bootnodes = get_bootnodes().await;
+        for b in bootnodes {
+            match swarm.dial(b.multiaddr) {
+                Err(e) => println!("{e}"),
+                Ok(_) => println!("Connected to peer: {:?}", b.peer_id),
             }
+            swarm
+                .behaviour_mut()
+                .gossipsub
+                .add_explicit_peer(&b.peer_id);
+        }
 
+        // Listen to topics
+        let topic = IdentTopic::new("ping");
+        swarm.behaviour_mut().gossipsub.subscribe(&topic).unwrap();
+
+        // Listen on all interfaces and whatever port the OS assigns.
+        swarm.listen_on("/ip4/0.0.0.0/tcp/3000".parse()?)?;
+        println!("PEER ID: {:?}", swarm.local_peer_id().to_base58());
+
+        // Kick it off.
+        loop {
+            select! {
+                event = swarm.select_next_some() =>  {
+                    self.handle_swarm_event(&mut swarm, event).await;
+                }
+            }
         }
     }
 
-    async fn handle_swarm_event(_swarm: &mut Swarm<Behaviour>, event: SwarmEvent<BehaviourEvent>) {
+    async fn handle_swarm_event(
+        &mut self,
+        _swarm: &mut Swarm<SheeldBehaviour>,
+        event: SwarmEvent<SheeldBehaviourEvent>,
+    ) {
         match event {
             SwarmEvent::NewListenAddr { address, .. } => {
                 println!("✅ Listening on: {address:?}");
             }
-            SwarmEvent::Behaviour(BehaviourEvent::Gossipsub(msg)) => {
+            SwarmEvent::Behaviour(SheeldBehaviourEvent::Gossipsub(msg)) => {
                 println!("Received: {:?}", msg);
                 match msg {
                     libp2p::gossipsub::Event::Message {
@@ -111,21 +110,19 @@ pub async fn start_libp2p() -> Result<(), Box<dyn Error>> {
                     _ => {}
                 }
             }
-            SwarmEvent::Behaviour(BehaviourEvent::Kademlia(KademliaEvent::RoutingUpdated {
-                peer,
-                ..
-            })) => {
-                println!("Discovered peer: {peer}");
-            }
             SwarmEvent::ConnectionEstablished {
                 peer_id,
                 connection_id: _,
-                endpoint: _,
+                endpoint,
                 num_established,
                 concurrent_dial_errors: _,
                 established_in: _,
             } => {
                 println!("🔌 Connection established with {peer_id} (remaining: {num_established})");
+                self.peers.push(PeerInfo {
+                    multiaddr: endpoint.get_remote_address().clone(),
+                    peer_id,
+                });
             }
             SwarmEvent::ConnectionClosed {
                 peer_id,
@@ -144,7 +141,7 @@ pub async fn start_libp2p() -> Result<(), Box<dyn Error>> {
     }
 }
 
-async fn get_bootnodes() -> Vec<Bootnode> {
+async fn get_bootnodes() -> Vec<PeerInfo> {
     let bootstrap_nodes_file_path: &str = "bootstrap_nodes.txt";
     let file_result = fs::read_to_string(bootstrap_nodes_file_path);
     let mut content = String::new();
@@ -156,23 +153,23 @@ async fn get_bootnodes() -> Vec<Bootnode> {
             println!("{:?}", e)
         }
     }
-    let mut bootnodes: Vec<Bootnode> = Vec::new();
+    let mut bootnodes: Vec<PeerInfo> = Vec::new();
     if content.is_empty() {
         return bootnodes;
     };
     for n in content.split('\n').into_iter() {
-        let bn = Bootnode::new(&n.split(":").nth(0).unwrap(), &n.split(":").nth(1).unwrap());
+        let bn = PeerInfo::new(&n.split(":").nth(0).unwrap(), &n.split(":").nth(1).unwrap());
         bootnodes.push(bn);
     }
     bootnodes
 }
 
-struct Bootnode {
+struct PeerInfo {
     multiaddr: Multiaddr,
     peer_id: PeerId,
 }
 
-impl Bootnode {
+impl PeerInfo {
     pub fn new(multiaddr: &str, peer_id: &str) -> Self {
         Self {
             peer_id: PeerId::from_str(peer_id).expect("Invalid PeerId"),
