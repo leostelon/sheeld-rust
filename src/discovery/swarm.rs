@@ -22,24 +22,6 @@ use crate::common::models::message::Message;
 
 #[tokio::main]
 pub async fn start_libp2p() -> Result<(), Box<dyn Error>> {
-    #[derive(Debug, PartialEq)]
-    enum InputCommand {
-        P,  // Connected peers
-        PN, // Parent Node
-    }
-
-    impl FromStr for InputCommand {
-        type Err = String;
-
-        fn from_str(s: &str) -> Result<Self, Self::Err> {
-            match s {
-                "p" => Ok(InputCommand::P),
-                "pn" => Ok(InputCommand::PN),
-                _ => Err(String::from("Invalid parameter")),
-            }
-        }
-    }
-
     #[derive(NetworkBehaviour)]
     struct Behaviour {
         kademlia: kad::Behaviour<MemoryStore>,
