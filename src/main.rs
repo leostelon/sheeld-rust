@@ -12,6 +12,19 @@ mod proxy;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
 
+    // Start SOCKS5 server
+    tokio::spawn(async move {
+        let fasts5 = proxy::fast_socks5::spawn_socks_server().await;
+        match fasts5 {
+            Err(e) => {
+                println!("{:?}", e);
+            }
+            Ok(m) => {
+                println!("{:?}", m);
+            }
+        }
+    });
+
     // Start gossip last
     tokio::spawn(async move {
         let mut sheeld_gossipsub = SheeldGossip::new();
@@ -25,17 +38,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     });
-    
-    // Start SOCKS5 server
-    let fasts5 = proxy::fast_socks5::spawn_socks_server().await;
-    match fasts5 {
-        Err(e) => {
-            println!("{:?}", e);
-        }
-        Ok(m) => {
-            println!("{:?}", m);
-        }
-    }
 
     loop {
         select! {
