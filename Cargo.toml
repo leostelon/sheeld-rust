@@ -19,3 +19,5 @@ libp2p = { version = "0.56.0", features = [
 tokio = { version = "1.46.1", features = ["full"] }
 tracing-subscriber = { features = ["env-filter"], version = "*" }
 serde = { version = "1.0", features = ["derive"] }
+fast-socks5 = { version = "1.0.0-rc.0" }
+structopt = "0.3.26"

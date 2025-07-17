@@ -7,9 +7,11 @@ use crate::discovery::swarm::SheeldGossip;
 
 mod common;
 mod discovery;
+mod proxy;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+
     // Start gossip last
     tokio::spawn(async move {
         let mut sheeld_gossipsub = SheeldGossip::new();
@@ -23,6 +25,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     });
+    
+    // Start SOCKS5 server
+    let fasts5 = proxy::fast_socks5::spawn_socks_server().await;
+    match fasts5 {
+        Err(e) => {
+            println!("{:?}", e);
+        }
+        Ok(m) => {
+            println!("{:?}", m);
+        }
+    }
 
     loop {
         select! {
