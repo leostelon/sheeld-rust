@@ -6,22 +6,21 @@ use tokio::net::TcpListener;
 
 use crate::common::utils::spawn_and_log_error::{spawn_and_log_error};
 
-struct SheeldFastSocks5 {
+pub struct SheeldFastSocks5 {
     listener_addr: String,
 }
 
 impl SheeldFastSocks5 {
-    pub fn new(self, listener_addr: String) -> Self {
+    pub fn new(listener_addr: String) -> Self {
         SheeldFastSocks5 {
             listener_addr: listener_addr,
         }
     }
 
     pub async fn spawn_socks_server(&self) -> Result<()> {
-        let listen_addr: String = String::from("127.0.0.1:3001");
-        let listener = TcpListener::bind(&listen_addr).await?;
+        let listener = TcpListener::bind(&self.listener_addr).await?;
 
-        println!("Listen for socks connections @ {}", &listen_addr);
+        println!("Listen for socks connections @ {}", &self.listener_addr);
 
         // Standard TCP loop
         loop {
