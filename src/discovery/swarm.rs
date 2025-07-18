@@ -50,7 +50,7 @@ impl SheeldGossip {
             .build();
 
         // Connect to bootstrap nodes if available
-        let bootnodes = get_bootnodes().await;
+        let bootnodes = self.get_bootnodes().await;
         for b in bootnodes {
             match swarm.dial(b.multiaddr) {
                 Err(e) => println!("{e}"),
@@ -138,27 +138,27 @@ impl SheeldGossip {
             _ => {}
         }
     }
-}
 
-async fn get_bootnodes() -> Vec<PeerInfo> {
-    let bootstrap_nodes_file_path: &str = "bootstrap_nodes.txt";
-    let file_result = fs::read_to_string(bootstrap_nodes_file_path);
-    let mut content = String::new();
-    match file_result {
-        Ok(c) => {
-            content = c;
+    async fn get_bootnodes(&mut self) -> Vec<PeerInfo> {
+        let bootstrap_nodes_file_path: &str = "bootstrap_nodes.txt";
+        let file_result = fs::read_to_string(bootstrap_nodes_file_path);
+        let mut content = String::new();
+        match file_result {
+            Ok(c) => {
+                content = c;
+            }
+            Err(e) => {
+                println!("{:?}", e)
+            }
         }
-        Err(e) => {
-            println!("{:?}", e)
+        let mut bootnodes: Vec<PeerInfo> = Vec::new();
+        if content.is_empty() {
+            return bootnodes;
+        };
+        for n in content.split('\n').into_iter() {
+            let bn = PeerInfo::new(&n.split(":").nth(0).unwrap(), &n.split(":").nth(1).unwrap());
+            bootnodes.push(bn);
         }
+        bootnodes
     }
-    let mut bootnodes: Vec<PeerInfo> = Vec::new();
-    if content.is_empty() {
-        return bootnodes;
-    };
-    for n in content.split('\n').into_iter() {
-        let bn = PeerInfo::new(&n.split(":").nth(0).unwrap(), &n.split(":").nth(1).unwrap());
-        bootnodes.push(bn);
-    }
-    bootnodes
 }
